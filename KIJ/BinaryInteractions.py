@@ -10,12 +10,11 @@ try:
     from IPython.display import display
     HAS_DISPLAY = True
 except Exception:
-    HAS_DISPLAY = False
-    
+    HAS_DISPLAY = False  
     
 class KIJMatrixBuilder:
     """
-    Build ternary kij polynomial matrices from per-pair KIJ.json files.
+    Build kij polynomial matrices from per-pair KIJ.json files.
 
     Run this inside the Kij/ directory that contains pair folders like:
         CO2_Ar/KIJ.json, H2_Ar/KIJ.json, CO2_H2/KIJ.json
@@ -125,20 +124,32 @@ class KIJMatrixBuilder:
             f"Tried folders: {', '.join(self._pair_folder_candidates(c1, c2))}"
         )
 
-    def load_ternary_pairs(self, ternary, model_map: dict | None = None):
+    def load_pairs(self, components, model_map: dict | None = None):
         """
-        Load the 3 binary pairs for a ternary system.
+        Load all binary pairs for a system of N components.
 
         model_map keys can be ('A','B') or ('B','A') – order does not matter.
         Example:
-          {('CO2','Ar'):'constant', ('H2','Ar'):'linear', ('CO2','H2'):'linear'}
+        {('CO2','Ar'):'constant', ('H2','Ar'):'linear', ('CO2','H2'):'linear'}
 
-        If a pair not provided: default = 'best'
+        If a pair is not provided in model_map: default = 'best'
+
+        Parameters
+        ----------
+        components : list of str
+            List of component names (any length >= 2).
+        model_map : dict, optional
+            Maps component pairs to kij model type.
+
+        Returns
+        -------
+        pair_data : dict
+            Dictionary keyed by (a, b) tuples with loaded kij pair data.
         """
-        if len(ternary) != 3:
-            raise ValueError("ternary must have exactly 3 components")
+        if len(components) < 2:
+            raise ValueError("components must have at least 2 components")
 
-        required_pairs = list(combinations(ternary, 2))
+        required_pairs = list(combinations(components, 2))
         pair_data = {}
 
         for a, b in required_pairs:
@@ -149,7 +160,6 @@ class KIJMatrixBuilder:
                 elif (b, a) in model_map:
                     chosen_model = model_map[(b, a)]
                 else:
-                    # also support canonical keys (sorted)
                     key = self._canon_pair(a, b)
                     if key in model_map:
                         chosen_model = model_map[key]
@@ -207,9 +217,7 @@ class KIJMatrixBuilder:
         Placeholder: Fill this once to mirror your grid.
 
         Use:
-          'check' for ✅
-          0 for yellow 0
-          or explicit 'linear'/'constant'/'quadratic'/'best'/'zero'
+        explicit 'linear'/'constant'/'quadratic'/'best'/'zero'
 
         NOTE: This is intentionally not complete; populate it to match your grid.
         """
@@ -241,29 +249,30 @@ class KIJMatrixBuilder:
         }
 
     # ============================================================
-    # Tensor build + evaluation (ternary)
+    # Tensor build + evaluation
     # ============================================================
 
     @staticmethod
-    def build_ternary_polynomial_tensor(ternary, pair_data):
+    def build_polynomial_tensor(components, pair_data):
         """
-        Builds tensor A[k] such that:
-          K(T) = sum_k A[k] * T^k
+        Build A[k] matrices for kij(T) = sum_k A[k] * T^k.
 
         Returns:
-          components (list[str])
-          A (list[np.ndarray]) where A[k] is 3x3
-          max_deg (int)
+        components: list of component names
+        A: list of numpy arrays (A[0], A[1], ..., A[max_deg])
+        max_deg: maximum polynomial degree across all pairs
         """
-        components = list(ternary)
-        idx = {c: i for i, c in enumerate(components)}
+        components  = list(components)
+        idx         = {c: i for i, c in enumerate(components)}
+        n           = len(components)
 
-        max_deg = max(info["deg"] for info in pair_data.values())
-        A = [np.zeros((3, 3), float) for _ in range(max_deg + 1)]
+        max_deg     = max(info["deg"] for info in pair_data.values())
+        A           = [np.zeros((n, n), float) for _ in range(max_deg + 1)]
 
         for (c1, c2), info in pair_data.items():
+
             i, j = idx[c1], idx[c2]
-            coeffs = info["coeffs_asc"]  # [a0, a1, ...]
+            coeffs = info["coeffs_asc"]
 
             for k, ak in enumerate(coeffs):
                 A[k][i, j] = ak
@@ -321,8 +330,8 @@ class KIJMatrixBuilder:
     # ============================================================
 
     @staticmethod
-    def validate_ternary(pair_data, ternary):
-        required_pairs = list(combinations(ternary, 2))
+    def validate_pairs(pair_data, components):
+        required_pairs = list(combinations(components, 2))
         for p in required_pairs:
             if p not in pair_data:
                 raise FileNotFoundError(f"Missing pair data for {p}")
@@ -336,9 +345,10 @@ class KIJMatrixBuilder:
         return degs
 
     @staticmethod
-    def warn_if_T_outside_ranges(pair_data, ternary, T):
+    def warn_if_T_outside_ranges(pair_data, components, T):
+        
         T = float(T)
-        required_pairs = list(combinations(ternary, 2))
+        required_pairs = list(combinations(components, 2))
 
         for a, b in required_pairs:
             info = pair_data[(a, b)]
@@ -353,8 +363,8 @@ class KIJMatrixBuilder:
                 print(f"Warning: T={T} K outside [{Tmin}, {Tmax}] for pair {a}-{b} (file: {info['path']})")
 
     @staticmethod
-    def print_pair_summary(pair_data, ternary):
-        required_pairs = list(combinations(ternary, 2))
+    def print_pair_summary(pair_data, components):
+        required_pairs = list(combinations(components, 2))
         print("\nPair summary (from KIJ.json):")
         for a, b in required_pairs:
             info = pair_data[(a, b)]
@@ -369,7 +379,7 @@ class KIJMatrixBuilder:
 
     def build_and_display(
         self,
-        ternary,
+        components,
         model_map=None,
         T_eval=300.0,
         digits=4,
@@ -383,14 +393,14 @@ class KIJMatrixBuilder:
         Returns:
           components, A, Knum, (T_symbol, Ksym), pair_data
         """
-        pair_data = self.load_ternary_pairs(ternary, model_map=model_map)
+        pair_data = self.load_pairs(components, model_map=model_map)
 
         if self.verbose:
-            self.print_pair_summary(pair_data, ternary)
-            self.validate_ternary(pair_data, ternary)
-            self.warn_if_T_outside_ranges(pair_data, ternary, T_eval)
+            self.print_pair_summary(pair_data, components)
+            self.validate_pairs(pair_data, components)
+            self.warn_if_T_outside_ranges(pair_data, components, T_eval)
 
-        components, A, max_deg = self.build_ternary_polynomial_tensor(ternary, pair_data)
+        components, A, max_deg = self.build_polynomial_tensor(components, pair_data)
 
         Knum = self.kij_numeric_matrix(T_eval, A)
         print(f"\nK({T_eval} K) =")
@@ -482,3 +492,62 @@ class KIJMatrixBuilder:
             f"Could not find {self.kij_filename} for pair {c1}-{c2}. "
             f"Tried folders: {', '.join(self._pair_folder_candidates(c1, c2))}"
         )
+        
+    def show_pair_plots(self, components, mode="plot"):
+        """
+        Display all pair plots for a component system in a single figure.
+        
+        mode: "plot" - kij_vs_T only (1 row, 3 cols)
+            "all"  - kij_vs_T + legend side by side (3 rows, 2 cols)
+        """
+        pairs = list(combinations(components, 2))
+        n_pairs = len(pairs)
+
+        if mode == "plot":
+            
+            _, axes = plt.subplots(1, n_pairs, figsize=(5 * n_pairs, 4))
+            axes = np.atleast_1d(axes)
+            
+            for ax, (c1, c2) in zip(axes, pairs):
+                for folder in self._pair_folder_candidates(c1, c2):
+                    path = (self.root / folder / self.kij_filename).resolve()
+                    if path.exists():
+                        d = json.loads(path.read_text(encoding="utf-8"))
+                        img_bytes = base64.b64decode(d["plots"]["kij_vs_T"])
+                        img = mpimg.imread(io.BytesIO(img_bytes))
+                        ax.imshow(img)
+                        ax.axis("off")
+                        ax.set_title(f"{c1}-{c2}")
+                        break
+            plt.tight_layout()
+            plt.show()
+
+        elif mode == "all":
+            
+            _, axes = plt.subplots(n_pairs, 2, figsize=(12, 4 * n_pairs))
+            axes = np.atleast_2d(axes)  # Ensure axes is 2D for consistent indexing
+            
+            for row, (c1, c2) in enumerate(pairs):
+                for folder in self._pair_folder_candidates(c1, c2):
+                    path = (self.root / folder / self.kij_filename).resolve()
+                    if path.exists():
+                        d = json.loads(path.read_text(encoding="utf-8"))
+                        # Left: kij_vs_T plot
+                        img_bytes = base64.b64decode(d["plots"]["kij_vs_T"])
+                        img = mpimg.imread(io.BytesIO(img_bytes))
+                        axes[row, 0].imshow(img)
+                        axes[row, 0].axis("off")
+                        axes[row, 0].set_title(f"{c1}-{c2}")
+                        # Right: legend
+                        if "legend" in d["plots"]:
+                            img_bytes = base64.b64decode(d["plots"]["legend"])
+                            img = mpimg.imread(io.BytesIO(img_bytes))
+                            axes[row, 1].imshow(img)
+                            axes[row, 1].axis("off")
+                            # axes[row, 1].set_title(f"{c1}-{c2} | legend")
+                        else:
+                            axes[row, 1].axis("off")
+                        break
+            plt.tight_layout()
+            plt.subplots_adjust(wspace=-0.1)
+            plt.show()

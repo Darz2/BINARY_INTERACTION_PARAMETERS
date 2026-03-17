@@ -102,6 +102,18 @@ class KIJMatrixBuilder:
             "path": str
           }
         """
+        # Handle "zero" model without requiring a file
+        if model == "zero":
+            return {
+                "model": "zero",
+                "deg": 0,
+                "coeffs_desc": [0.0],
+                "coeffs_asc": [0.0],
+                "T_min": None,
+                "T_max": None,
+                "path": None,
+            }
+
         for folder in self._pair_folder_candidates(c1, c2):
             path = self.root / folder / self.kij_filename
             if path.exists():
@@ -496,7 +508,7 @@ class KIJMatrixBuilder:
     def show_pair_plots(self, components, mode="plot"):
         """
         Display all pair plots for a component system in a single figure.
-        
+
         mode: "plot" - kij_vs_T only (1 row, 3 cols)
             "all"  - kij_vs_T + legend side by side (3 rows, 2 cols)
         """
@@ -504,50 +516,79 @@ class KIJMatrixBuilder:
         n_pairs = len(pairs)
 
         if mode == "plot":
-            
+
             _, axes = plt.subplots(1, n_pairs, figsize=(5 * n_pairs, 4))
             axes = np.atleast_1d(axes)
-            
+
             for ax, (c1, c2) in zip(axes, pairs):
-                for folder in self._pair_folder_candidates(c1, c2):
-                    path = (self.root / folder / self.kij_filename).resolve()
-                    if path.exists():
-                        d = json.loads(path.read_text(encoding="utf-8"))
-                        img_bytes = base64.b64decode(d["plots"]["kij_vs_T"])
-                        img = mpimg.imread(io.BytesIO(img_bytes))
-                        ax.imshow(img)
-                        ax.axis("off")
-                        ax.set_title(f"{c1}-{c2}")
-                        break
+                plot_found = False
+                try:
+                    for folder in self._pair_folder_candidates(c1, c2):
+                        path = (self.root / folder / self.kij_filename).resolve()
+                        if path.exists():
+                            try:
+                                d = json.loads(path.read_text(encoding="utf-8"))
+                                img_bytes = base64.b64decode(d["plots"]["kij_vs_T"])
+                                img = mpimg.imread(io.BytesIO(img_bytes))
+                                ax.imshow(img)
+                                ax.axis("off")
+                                ax.set_title(f"{c1}-{c2}")
+                                plot_found = True
+                                break
+                            except (KeyError, ValueError, IOError) as e:
+                                continue
+                except Exception as e:
+                    print(f"Warning: Could not load plot for {c1}-{c2}: {e}")
+
+                if not plot_found:
+                    ax.axis("off")
+                    ax.set_title(f"{c1}-{c2} (folder missing)")
+                    print(f"Warning: Folder missing for pair {c1}-{c2}")
+
             plt.tight_layout()
             plt.show()
 
         elif mode == "all":
-            
+
             _, axes = plt.subplots(n_pairs, 2, figsize=(12, 4 * n_pairs))
             axes = np.atleast_2d(axes)  # Ensure axes is 2D for consistent indexing
-            
+
             for row, (c1, c2) in enumerate(pairs):
-                for folder in self._pair_folder_candidates(c1, c2):
-                    path = (self.root / folder / self.kij_filename).resolve()
-                    if path.exists():
-                        d = json.loads(path.read_text(encoding="utf-8"))
-                        # Left: kij_vs_T plot
-                        img_bytes = base64.b64decode(d["plots"]["kij_vs_T"])
-                        img = mpimg.imread(io.BytesIO(img_bytes))
-                        axes[row, 0].imshow(img)
-                        axes[row, 0].axis("off")
-                        axes[row, 0].set_title(f"{c1}-{c2}")
-                        # Right: legend
-                        if "legend" in d["plots"]:
-                            img_bytes = base64.b64decode(d["plots"]["legend"])
-                            img = mpimg.imread(io.BytesIO(img_bytes))
-                            axes[row, 1].imshow(img)
-                            axes[row, 1].axis("off")
-                            # axes[row, 1].set_title(f"{c1}-{c2} | legend")
-                        else:
-                            axes[row, 1].axis("off")
-                        break
+                plot_found = False
+                try:
+                    for folder in self._pair_folder_candidates(c1, c2):
+                        path = (self.root / folder / self.kij_filename).resolve()
+                        if path.exists():
+                            try:
+                                d = json.loads(path.read_text(encoding="utf-8"))
+                                # Left: kij_vs_T plot
+                                img_bytes = base64.b64decode(d["plots"]["kij_vs_T"])
+                                img = mpimg.imread(io.BytesIO(img_bytes))
+                                axes[row, 0].imshow(img)
+                                axes[row, 0].axis("off")
+                                axes[row, 0].set_title(f"{c1}-{c2}")
+                                # Right: legend
+                                if "legend" in d["plots"]:
+                                    img_bytes = base64.b64decode(d["plots"]["legend"])
+                                    img = mpimg.imread(io.BytesIO(img_bytes))
+                                    axes[row, 1].imshow(img)
+                                    axes[row, 1].axis("off")
+                                    # axes[row, 1].set_title(f"{c1}-{c2} | legend")
+                                else:
+                                    axes[row, 1].axis("off")
+                                plot_found = True
+                                break
+                            except (KeyError, ValueError, IOError) as e:
+                                continue
+                except Exception as e:
+                    print(f"Warning: Could not load plot for {c1}-{c2}: {e}")
+
+                if not plot_found:
+                    axes[row, 0].axis("off")
+                    axes[row, 1].axis("off")
+                    axes[row, 0].set_title(f"{c1}-{c2} (folder missing)")
+                    print(f"Warning: Folder missing for pair {c1}-{c2}")
+
             plt.tight_layout()
             plt.subplots_adjust(wspace=-0.1)
             plt.show()

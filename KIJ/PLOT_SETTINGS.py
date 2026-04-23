@@ -1,10 +1,29 @@
 #!/usr/bin/env python
 
 ############# Required Packages ############
-import matplotlib.pyplot as plt, scienceplots, matplotlib.colors as mcolors, os
+import matplotlib.pyplot as plt, scienceplots, matplotlib.colors as mcolors, os, shutil
 import matplotlib as mpl
+from matplotlib import font_manager
+
+
+def _latex_available():
+    """Return True when a LaTeX executable is available on PATH."""
+    return shutil.which("latex") is not None
+
+
+def _first_available_font(candidates):
+    """Return the first installed font from candidates, else a safe serif fallback."""
+    available_fonts = {
+        f.name for f in font_manager.fontManager.ttflist
+    }
+    for font_name in candidates:
+        if font_name in available_fonts:
+            return font_name
+    return "DejaVu Serif"
+
+
 ############# Set LaTeX for text rendering ############
-mpl.rcParams['text.usetex'] = True
+mpl.rcParams['text.usetex'] = _latex_available()
 ############# PLOT SETTINGS ############
 plot_size           = (4, 3) # Default
 colors              = ['#e41a1c', '#008000', '#377eb8', '#ff7f00', '#984ea3', '#a65628', '#f781bf']
@@ -45,8 +64,9 @@ dual_colors = [
     ("#A6CEE3", "#1F78B4"),   # light blue (face, edge)
 ]
 
-graphic_font        = 'Arial'
-math_font           = 'dejavuserif'  # ['dejavusans', 'dejavuserif', 'cm', 'stix', 'stixsans', 'custom']
+font_serif_candidates = ['Computer Modern Roman', 'CMU Serif', 'Latin Modern Roman', 'Times New Roman', 'DejaVu Serif']
+graphic_font        = _first_available_font(font_serif_candidates)
+math_font           = 'cm'  # ['dejavusans', 'dejavuserif', 'cm', 'stix', 'stixsans', 'custom']
 spine_width         = 1.5
 markersize          = 4
 capsize             = 3
@@ -80,9 +100,10 @@ def plot_init():
     
     with plt.style.context(['ieee']):
         
-        plt.rcParams['font.family'] = graphic_font
+        plt.rcParams['font.family'] = 'serif'
+        plt.rcParams['font.serif'] = [graphic_font] + [f for f in font_serif_candidates if f != graphic_font]
         plt.rcParams['mathtext.fontset'] = math_font
-        plt.rcParams['text.usetex'] = True
+        plt.rcParams['text.usetex'] = _latex_available()
         
         fig, ax = plt.subplots(figsize=plot_size)
 
